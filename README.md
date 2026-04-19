@@ -114,6 +114,12 @@ hgw-research \
 
 When `--output-file` is used, parent directories are created automatically and the CLI prints the written path to stderr.
 
+Markdown reports are now citation-aware:
+- each finding renders a **Best evidence** block
+- evidence items include inline source citations like `[1]`
+- repeated sources are collected into a deduplicated `## Sources` appendix
+- quotes and publication dates are included when available
+
 Customize the Gemini executable or flags. When omitted, runner arguments default to `--output-format json --approval-mode=yolo --prompt`, which asks Gemini CLI for wrapper JSON, auto-approves tools in headless mode, and passes the generated prompt as the `--prompt` value:
 
 ```bash
