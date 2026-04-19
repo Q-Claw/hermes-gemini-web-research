@@ -4,7 +4,15 @@ import json
 from datetime import datetime, timezone
 
 from hermes_gemini_web_research.cli import main
-from hermes_gemini_web_research.models import ResearchAngle, ResearchResult, WorkerOutput, WorkerResult, WorkerStatus
+from hermes_gemini_web_research.models import (
+    EvidenceItem,
+    ReconciledFinding,
+    ResearchAngle,
+    ResearchResult,
+    WorkerOutput,
+    WorkerResult,
+    WorkerStatus,
+)
 
 
 class StubOrchestrator:
@@ -22,7 +30,34 @@ class StubOrchestrator:
             question=request.question,
             status="complete",
             summary="Current facts: concise summary",
-            findings=[],
+            findings=[
+                ReconciledFinding(
+                    finding="concise summary",
+                    supporting_angles=["Current facts"],
+                    evidence=[
+                        EvidenceItem(
+                            type="source",
+                            claim="Docs support concise summary.",
+                            source_title="Docs",
+                            url="https://example.com/docs",
+                            confidence=0.9,
+                        )
+                    ],
+                    source_count=1,
+                    source_diversity=1.0,
+                    consensus_score=0.74,
+                    confidence="medium",
+                    severity="low",
+                    best_evidence=EvidenceItem(
+                        type="source",
+                        claim="Docs support concise summary.",
+                        source_title="Docs",
+                        url="https://example.com/docs",
+                        confidence=0.9,
+                    ),
+                    best_evidence_score=1.0,
+                )
+            ],
             worker_results=[
                 WorkerResult(
                     angle=ResearchAngle(name="Current facts", description="desc"),
@@ -79,6 +114,11 @@ def test_cli_writes_json_output_file(tmp_path, monkeypatch, capsys):
     assert exit_code == 0
     assert payload["question"] == "What happened?"
     assert payload["synthesis_method"] == "deterministic"
+    assert payload["report_summary"]["finding_count"] == 1
+    assert payload["findings"][0]["best_evidence"]["source_title"] == "Docs"
+    assert payload["findings"][0]["best_evidence_score"] == 1.0
+    assert payload["findings"][0]["consensus_score"] == 0.74
+    assert payload["findings"][0]["source_diversity"] == 1.0
     assert captured.out == ""
     assert str(output_file) in captured.err
 

@@ -15,6 +15,23 @@ def render_markdown_report(result: ResearchResult) -> str:
         f"Status: **{result.status}**",
         f"Synthesis: **{result.synthesis_method}**",
         "",
+        "## Severity / Confidence Summary",
+        "",
+        f"Findings: {result.report_summary.finding_count}",
+        (
+            "Confidence: "
+            f"high {result.report_summary.confidence_counts['high']}, "
+            f"medium {result.report_summary.confidence_counts['medium']}, "
+            f"low {result.report_summary.confidence_counts['low']}"
+        ),
+        (
+            "Severity: "
+            f"high {result.report_summary.severity_counts['high']}, "
+            f"medium {result.report_summary.severity_counts['medium']}, "
+            f"low {result.report_summary.severity_counts['low']}"
+        ),
+        f"Contradictions: {result.report_summary.contradiction_count}",
+        "",
         "## Summary",
         "",
         result.summary,
@@ -27,8 +44,18 @@ def render_markdown_report(result: ResearchResult) -> str:
         lines.append("No reconciled findings were produced.")
     for index, finding in enumerate(result.findings, start=1):
         lines.append(f"{index}. {finding.finding}")
+        lines.append(
+            "   - "
+            f"Consensus: {finding.consensus_score:.2f}; "
+            f"confidence: {finding.confidence}; "
+            f"severity: {finding.severity}; "
+            f"sources: {finding.source_count}; "
+            f"diversity: {finding.source_diversity:.2f}"
+        )
         if finding.supporting_angles:
             lines.append(f"   - Angles: {', '.join(finding.supporting_angles)}")
+        for contradiction in finding.contradicts:
+            lines.append(f"   - Contradiction: {contradiction}")
         if finding.evidence:
             lines.append("   - Best evidence:")
         for evidence in finding.evidence[:3]:

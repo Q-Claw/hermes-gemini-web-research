@@ -7,8 +7,9 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from hermes_gemini_web_research.models import ResearchResult, SemanticSynthesisOutput
+from hermes_gemini_web_research.models import ResearchResult, SemanticSynthesisOutput, build_report_summary
 from hermes_gemini_web_research.prompts import build_semantic_synthesis_prompt, parse_json_model
+from hermes_gemini_web_research.reconcile import enrich_findings
 from hermes_gemini_web_research.runner import GeminiRunner
 
 
@@ -41,10 +42,15 @@ class GeminiSemanticSynthesizer:
                 last_error = exc
                 continue
 
+            enriched_findings = enrich_findings(
+                parsed.findings,
+                total_angles=len({worker.angle.name for worker in deterministic_result.worker_results}) or 1,
+            )
             return deterministic_result.model_copy(
                 update={
                     "summary": parsed.summary,
-                    "findings": parsed.findings,
+                    "findings": enriched_findings,
+                    "report_summary": build_report_summary(enriched_findings),
                     "synthesis_method": "semantic",
                     "synthesis_error": None,
                 },

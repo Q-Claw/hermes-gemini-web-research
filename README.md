@@ -114,11 +114,12 @@ hgw-research \
 
 When `--output-file` is used, parent directories are created automatically and the CLI prints the written path to stderr.
 
-Markdown reports are now citation-aware:
-- each finding renders a **Best evidence** block
-- evidence items include inline source citations like `[1]`
+Markdown reports are now citation-aware and reconciliation metadata is exposed structurally:
+- each finding renders a **Best evidence** block with inline source citations like `[1]`
 - repeated sources are collected into a deduplicated `## Sources` appendix
 - quotes and publication dates are included when available
+- reports include a top-level severity / confidence summary plus contradiction counts
+- JSON output includes per-finding `best_evidence`, `best_evidence_score`, `source_count`, `source_diversity`, `consensus_score`, `confidence`, `severity`, and `contradicts`
 
 Customize the Gemini executable or flags. When omitted, runner arguments default to `--output-format json --approval-mode=yolo --prompt`, which asks Gemini CLI for wrapper JSON, auto-approves tools in headless mode, and passes the generated prompt as the `--prompt` value:
 
@@ -167,7 +168,7 @@ ANSI escape sequences are stripped before wrapper and worker JSON parsing so col
 
 ## Synthesis
 
-Deterministic reconciliation is always the baseline. It now performs lightweight token-based clustering for near-duplicate findings, keeps top evidence, and records worker failures or open questions as limitations. Every `ResearchResult` includes:
+Deterministic reconciliation is always the baseline. It now performs lightweight token-based clustering for near-duplicate findings, keeps the full ranked/deduped evidence set for scoring and JSON output, renders the top evidence in Markdown, and records worker failures or open questions as limitations. Every `ResearchResult` includes:
 
 - `synthesis_method`: `deterministic` or `semantic`
 - `synthesis_error`: the semantic synthesis error when fallback was needed, otherwise `null`

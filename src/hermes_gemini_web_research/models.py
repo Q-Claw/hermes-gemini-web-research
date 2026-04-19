@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 class EvidenceType(str, Enum):
@@ -194,6 +194,27 @@ class ReconciledFinding(BaseModel):
     finding: str
     supporting_angles: list[str] = Field(default_factory=list)
     evidence: list[EvidenceItem] = Field(default_factory=list)
+    source_count: int = Field(default=0, ge=0)
+    source_diversity: float = Field(default=0.0, ge=0, le=1)
+    consensus_score: float = Field(default=0.0, ge=0, le=1)
+    confidence: Literal["high", "medium", "low"] = "low"
+    severity: Literal["high", "medium", "low"] = "low"
+    best_evidence: EvidenceItem | None = None
+    best_evidence_score: float | None = Field(default=None, ge=0, le=1)
+    contradicts: list[str] = Field(default_factory=list)
+
+
+class ReportSummary(BaseModel):
+    """Compact report-level severity and confidence counts."""
+
+    finding_count: int = Field(default=0, ge=0)
+    confidence_counts: dict[Literal["high", "medium", "low"], int] = Field(
+        default_factory=lambda: {"high": 0, "medium": 0, "low": 0}
+    )
+    severity_counts: dict[Literal["high", "medium", "low"], int] = Field(
+        default_factory=lambda: {"high": 0, "medium": 0, "low": 0}
+    )
+    contradiction_count: int = Field(default=0, ge=0)
 
 
 class ResearchResult(BaseModel):
@@ -203,10 +224,16 @@ class ResearchResult(BaseModel):
     status: Literal["complete", "partial", "failed"]
     summary: str
     findings: list[ReconciledFinding] = Field(default_factory=list)
+    report_summary: ReportSummary = Field(default_factory=ReportSummary)
     worker_results: list[WorkerResult] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     synthesis_method: Literal["deterministic", "semantic"] = "deterministic"
     synthesis_error: str | None = None
+
+    @model_validator(mode="after")
+    def populate_report_summary(self) -> "ResearchResult":
+        self.report_summary = build_report_summary(self.findings)
+        return self
 
 
 class SemanticSynthesisOutput(BaseModel):
@@ -216,3 +243,24 @@ class SemanticSynthesisOutput(BaseModel):
 
     summary: str = Field(..., min_length=1)
     findings: list[ReconciledFinding] = Field(default_factory=list)
+
+
+def build_report_summary(findings: list[ReconciledFinding]) -> ReportSummary:
+    """Build deterministic report-level counts from reconciled findings."""
+
+    confidence_counts: dict[Literal["high", "medium", "low"], int] = {"high": 0, "medium": 0, "low": 0}
+    severity_counts: dict[Literal["high", "medium", "low"], int] = {"high": 0, "medium": 0, "low": 0}
+    contradiction_pairs: set[tuple[str, str]] = set()
+
+    for finding in findings:
+        confidence_counts[finding.confidence] += 1
+        severity_counts[finding.severity] += 1
+        for contradiction in finding.contradicts:
+            contradiction_pairs.add(tuple(sorted((finding.finding, contradiction))))
+
+    return ReportSummary(
+        finding_count=len(findings),
+        confidence_counts=confidence_counts,
+        severity_counts=severity_counts,
+        contradiction_count=len(contradiction_pairs),
+    )
