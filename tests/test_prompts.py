@@ -144,3 +144,41 @@ else:
     assert result.output is not None
     assert result.output.answer == "Recovered"
     assert counter.read_text() == "2"
+
+
+@pytest.mark.asyncio
+async def test_runner_can_fall_back_to_stdin_for_large_prompts(tmp_path):
+    capture_path = tmp_path / "captured.json"
+    script = """
+import json
+import pathlib
+import sys
+
+capture_path = pathlib.Path(sys.argv[1])
+prompt_value = sys.argv[-1]
+stdin_payload = sys.stdin.read()
+capture_path.write_text(json.dumps({"prompt_value": prompt_value, "stdin_payload": stdin_payload}))
+print(json.dumps({"text": json.dumps({"angle_name": "Facts", "answer": "From stdin"})}))
+"""
+    runner = GeminiRunner(
+        command=sys.executable,
+        args=["-c", script, str(capture_path), "--prompt"],
+        max_retries=0,
+        prompt_stdin_threshold=10,
+    )
+
+    result = await runner.run(
+        WorkerInput(
+            question="This question is intentionally long enough to trigger stdin fallback.",
+            angle=ResearchAngle(name="Facts", description="Check stdin fallback."),
+        ),
+        timeout_seconds=5,
+    )
+
+    payload = json.loads(capture_path.read_text())
+
+    assert result.status == WorkerStatus.SUCCEEDED
+    assert result.output is not None
+    assert result.output.answer == "From stdin"
+    assert payload["prompt_value"] == ""
+    assert "Question: This question is intentionally long enough to trigger stdin fallback." in payload["stdin_payload"]

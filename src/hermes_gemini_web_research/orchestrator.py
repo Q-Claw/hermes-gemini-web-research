@@ -30,11 +30,29 @@ class WorkerRunner(Protocol):
         ...
 
 
+class SemanticSynthesizer(Protocol):
+    """Optional second-stage synthesizer for refining deterministic reconciliation."""
+
+    async def synthesize(
+        self,
+        question: str,
+        deterministic_result: ResearchResult,
+        timeout_seconds: float,
+    ) -> ResearchResult:
+        ...
+
+
 class ResearchOrchestrator:
     """Run research angles concurrently and reconcile validated worker outputs."""
 
-    def __init__(self, runner: WorkerRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: WorkerRunner | None = None,
+        *,
+        synthesizer: SemanticSynthesizer | None = None,
+    ) -> None:
         self.runner = runner or GeminiRunner()
+        self.synthesizer = synthesizer
 
     async def run(self, request: ResearchRequest) -> ResearchResult:
         angles = request.angles or DEFAULT_ANGLES
@@ -48,5 +66,22 @@ class ResearchOrchestrator:
                 )
 
         worker_results = await asyncio.gather(*(run_angle(angle) for angle in angles))
-        return reconcile(request.question, list(worker_results))
+        deterministic_result = reconcile(request.question, list(worker_results))
 
+        if not request.semantic_synthesis or self.synthesizer is None:
+            return deterministic_result
+
+        try:
+            result = await self.synthesizer.synthesize(
+                request.question,
+                deterministic_result.model_copy(deep=True),
+                request.timeout_seconds,
+            )
+        except Exception as exc:
+            deterministic_result.synthesis_method = "deterministic"
+            deterministic_result.synthesis_error = str(exc)
+            return deterministic_result
+
+        result.synthesis_method = "semantic"
+        result.synthesis_error = None
+        return result

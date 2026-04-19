@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gemini Web Research"
+  short_description: "Run parallel Gemini CLI research from Hermes."
+  default_prompt: "Use this skill to research a current question with hermes-gemini-web-research."

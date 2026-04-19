@@ -33,6 +33,10 @@ class ResearchRequest(BaseModel):
     angles: list[ResearchAngle] = Field(default_factory=list)
     timeout_seconds: float = Field(default=120.0, gt=0)
     max_concurrency: int = Field(default=4, ge=1, le=12)
+    semantic_synthesis: bool = Field(
+        default=False,
+        description="When true, allow an optional semantic synthesizer to refine deterministic reconciliation.",
+    )
 
     @field_validator("angles")
     @classmethod
@@ -201,3 +205,14 @@ class ResearchResult(BaseModel):
     findings: list[ReconciledFinding] = Field(default_factory=list)
     worker_results: list[WorkerResult] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    synthesis_method: Literal["deterministic", "semantic"] = "deterministic"
+    synthesis_error: str | None = None
+
+
+class SemanticSynthesisOutput(BaseModel):
+    """Structured output requested from the optional semantic synthesis pass."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(..., min_length=1)
+    findings: list[ReconciledFinding] = Field(default_factory=list)

@@ -42,6 +42,7 @@ class GeminiRunner:
         initial_backoff_seconds: float = 1.0,
         backoff_multiplier: float = 2.0,
         max_backoff_seconds: float = 10.0,
+        prompt_stdin_threshold: int = 12000,
     ) -> None:
         self.command = command
         self.args = args or ["--output-format", "json", "--approval-mode=yolo", "--prompt"]
@@ -50,6 +51,7 @@ class GeminiRunner:
         self.initial_backoff_seconds = max(0.0, initial_backoff_seconds)
         self.backoff_multiplier = max(1.0, backoff_multiplier)
         self.max_backoff_seconds = max(0.0, max_backoff_seconds)
+        self.prompt_stdin_threshold = max(0, prompt_stdin_threshold)
 
     async def run(self, worker_input: WorkerInput, timeout_seconds: float) -> WorkerResult:
         """Run one worker and return a validated result or structured failure."""
@@ -83,6 +85,26 @@ class GeminiRunner:
             usage=last_failure.usage,
         )
 
+    async def run_prompt(self, prompt: str, timeout_seconds: float) -> tuple[str, object | None]:
+        """Run an arbitrary strict-JSON prompt and return raw model text plus usage metadata."""
+
+        last_failure: _AttemptFailure | None = None
+        for attempt in range(self.max_retries + 1):
+            result = await self._run_text_attempt(prompt, timeout_seconds)
+            if not isinstance(result, _AttemptFailure):
+                return result
+
+            last_failure = result
+            if attempt >= self.max_retries or not self._should_retry(result):
+                break
+
+            await asyncio.sleep(self._backoff_seconds(attempt))
+
+        assert last_failure is not None
+        attempts = attempt + 1
+        suffix = f" after {attempts} attempts" if attempts > 1 else ""
+        raise RuntimeError(f"{last_failure.error}{suffix}")
+
     async def _run_attempt(
         self,
         worker_input: WorkerInput,
@@ -91,19 +113,48 @@ class GeminiRunner:
         started: datetime,
         started_monotonic: float,
     ) -> WorkerResult | _AttemptFailure:
+        result = await self._run_text_attempt(prompt, timeout_seconds)
+        if isinstance(result, _AttemptFailure):
+            return result
+
+        text, usage = result
+        try:
+            output = parse_worker_output(text)
+        except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+            return _AttemptFailure(
+                WorkerStatus.INVALID_JSON,
+                f"invalid worker JSON: {exc}",
+                raw_text=text,
+                usage=usage,
+            )
+
+        completed = datetime.now(timezone.utc)
+        return WorkerResult(
+            angle=worker_input.angle,
+            status=WorkerStatus.SUCCEEDED,
+            output=output,
+            raw_text=text,
+            started_at=started,
+            completed_at=completed,
+            duration_seconds=round(time.monotonic() - started_monotonic, 3),
+            usage=usage,
+        )
+
+    async def _run_text_attempt(self, prompt: str, timeout_seconds: float) -> tuple[str, object | None] | _AttemptFailure:
         proc: asyncio.subprocess.Process | None = None
+        command_args, stdin_payload = self._prepare_prompt_invocation(prompt)
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.command,
-                *self.args,
-                prompt,
+                *command_args,
+                stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
+                proc.communicate(stdin_payload.encode("utf-8") if stdin_payload is not None else None),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
@@ -141,27 +192,18 @@ class GeminiRunner:
                 usage=usage,
             )
 
-        try:
-            output = parse_worker_output(text)
-        except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-            return _AttemptFailure(
-                WorkerStatus.INVALID_JSON,
-                f"invalid worker JSON: {exc}",
-                raw_text=text,
-                usage=usage,
-            )
+        return text, usage
 
-        completed = datetime.now(timezone.utc)
-        return WorkerResult(
-            angle=worker_input.angle,
-            status=WorkerStatus.SUCCEEDED,
-            output=output,
-            raw_text=text,
-            started_at=started,
-            completed_at=completed,
-            duration_seconds=round(time.monotonic() - started_monotonic, 3),
-            usage=usage,
-        )
+    def _prepare_prompt_invocation(self, prompt: str) -> tuple[list[str], str | None]:
+        prompt_bytes = len(prompt.encode("utf-8"))
+        if (
+            self.prompt_stdin_threshold
+            and prompt_bytes > self.prompt_stdin_threshold
+            and self.args
+            and self.args[-1] in {"--prompt", "-p"}
+        ):
+            return [*self.args, ""], prompt
+        return [*self.args, prompt], None
 
     def _unwrap(self, stdout: str):
         text, usage, _ = self._unwrap_with_error(stdout)

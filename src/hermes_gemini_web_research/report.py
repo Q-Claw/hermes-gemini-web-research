@@ -12,6 +12,7 @@ def render_markdown_report(result: ResearchResult) -> str:
         f"# Research Report: {result.question}",
         "",
         f"Status: **{result.status}**",
+        f"Synthesis: **{result.synthesis_method}**",
         "",
         "## Summary",
         "",
@@ -58,5 +59,7 @@ def render_markdown_report(result: ResearchResult) -> str:
         for limitation in result.limitations:
             lines.append(f"- {limitation}")
 
-    return "\n".join(lines).strip() + "\n"
+    if result.synthesis_error:
+        lines.extend(["", "## Synthesis Fallback", "", result.synthesis_error])
 
+    return "\n".join(lines).strip() + "\n"

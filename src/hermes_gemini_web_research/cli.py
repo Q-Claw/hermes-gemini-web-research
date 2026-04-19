@@ -14,6 +14,7 @@ from hermes_gemini_web_research.models import ResearchAngle, ResearchRequest
 from hermes_gemini_web_research.orchestrator import ResearchOrchestrator
 from hermes_gemini_web_research.report import render_markdown_report
 from hermes_gemini_web_research.runner import GeminiRunner
+from hermes_gemini_web_research.synthesis import GeminiSemanticSynthesizer
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,18 +28,31 @@ def main(argv: list[str] | None = None) -> int:
             angles=angles,
             timeout_seconds=args.timeout,
             max_concurrency=args.max_concurrency,
+            semantic_synthesis=args.semantic_synthesis,
         )
     except (OSError, ValueError, ValidationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     runner = GeminiRunner(command=args.gemini_command, args=args.gemini_arg or None)
-    result = asyncio.run(ResearchOrchestrator(runner).run(request))
+    synthesizer = GeminiSemanticSynthesizer(runner=runner) if args.semantic_synthesis else None
+    result = asyncio.run(ResearchOrchestrator(runner, synthesizer=synthesizer).run(request))
 
     if args.format == "json":
-        print(result.model_dump_json(indent=2))
+        rendered = result.model_dump_json(indent=2)
     else:
-        print(render_markdown_report(result))
+        rendered = render_markdown_report(result)
+
+    if args.output_file:
+        try:
+            args.output_file.parent.mkdir(parents=True, exist_ok=True)
+            args.output_file.write_text(rendered if rendered.endswith("\n") else f"{rendered}\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"error: failed to write output file: {exc}", file=sys.stderr)
+            return 2
+        print(f"wrote report to {args.output_file}", file=sys.stderr)
+    else:
+        print(rendered)
 
     return 0 if result.status in {"complete", "partial"} else 1
 
@@ -73,6 +87,12 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    parser.add_argument("--output-file", type=Path, help="Write the rendered report to this file instead of stdout.")
+    parser.add_argument(
+        "--semantic-synthesis",
+        action="store_true",
+        help="Run an additional Gemini CLI semantic synthesis pass after deterministic reconciliation.",
+    )
     return parser
 
 

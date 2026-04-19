@@ -1,12 +1,12 @@
 # hermes-gemini-web-research
 
-`hermes-gemini-web-research` is a small Python controller for running multiple headless Gemini CLI research workers in parallel, validating each worker's strict JSON output with Pydantic, and reconciling the results into a Markdown or JSON report.
+`hermes-gemini-web-research` is a small Python controller for running multiple headless Gemini CLI research workers in parallel, validating each worker's strict JSON output with Pydantic, and reconciling the results into a Markdown or JSON report file.
 
 The intended use case is Hermes, or another controller, asking 3-6 independent research angles to investigate one question, then collecting evidence, caveats, telemetry, and a synthesized result without depending on brittle free-form model text.
 
 ## Status
 
-This is an MVP scaffold. It has a practical subprocess runner and a stable internal contract. The default Gemini command now targets the official headless JSON mode, while still allowing wrapper-specific flags to be overridden.
+This is an MVP scaffold. It has a practical subprocess runner, a stable internal contract, deterministic reconciliation, optional semantic synthesis hooks with fallback, and report-file output. The default Gemini command targets headless JSON mode, while still allowing wrapper-specific flags to be overridden.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ The package lives under `src/hermes_gemini_web_research/`:
 - `models.py` defines Pydantic models for research requests, angles, worker input/output, evidence, wrapper telemetry, worker results, and final reconciliation.
 - `prompts.py` builds strict JSON prompts and extracts JSON objects from raw model text.
 - `runner.py` runs Gemini CLI via `asyncio.create_subprocess_exec`, applies per-worker timeouts, strips terminal escape sequences, retries bounded recoverable failures with exponential backoff, parses optional wrapper JSON, extracts telemetry, and validates worker JSON.
-- `orchestrator.py` runs angles concurrently with a bounded semaphore and passes results to reconciliation.
+- `orchestrator.py` runs angles concurrently with a bounded semaphore, passes results to reconciliation, and optionally calls a semantic synthesizer.
 - `reconcile.py` performs a conservative deterministic synthesis over successful worker outputs and records limitations from failed or uncertain workers.
 - `report.py` renders final structured results as Markdown.
 - `cli.py` provides the `hermes-gemini-web-research` and `hgw-research` console commands.
@@ -27,8 +27,9 @@ The flow is:
 3. The runner builds a strict JSON prompt and invokes Gemini CLI headlessly.
 4. Gemini stdout is treated as either raw worker JSON or wrapper JSON containing model text plus telemetry.
 5. Worker JSON is validated as `WorkerOutput`.
-6. Worker results are reconciled into a `ResearchResult`.
-7. The CLI prints Markdown or JSON.
+6. Worker results are reconciled into a `ResearchResult` with `synthesis_method="deterministic"`.
+7. If requested through the Python API and a synthesizer is provided, semantic synthesis can refine the deterministic result. Failures fall back to the deterministic result and populate `synthesis_error`.
+8. The CLI prints or writes Markdown or JSON.
 
 ## Quickstart
 
@@ -102,6 +103,17 @@ Output JSON instead of Markdown:
 hgw-research "Summarize the latest evidence on a topic" --format json
 ```
 
+Write a report file instead of printing the rendered report to stdout:
+
+```bash
+hgw-research \
+  "Summarize the latest evidence on a topic" \
+  --format markdown \
+  --output-file reports/research.md
+```
+
+When `--output-file` is used, parent directories are created automatically and the CLI prints the written path to stderr.
+
 Customize the Gemini executable or flags. When omitted, runner arguments default to `--output-format json --approval-mode=yolo --prompt`, which asks Gemini CLI for wrapper JSON, auto-approves tools in headless mode, and passes the generated prompt as the `--prompt` value:
 
 ```bash
@@ -147,6 +159,47 @@ Wrapper-level failures are treated as worker failures even when the subprocess e
 
 ANSI escape sequences are stripped before wrapper and worker JSON parsing so colored CLI output does not poison validation.
 
+## Synthesis
+
+Deterministic reconciliation is always the baseline. It deduplicates findings by normalized text, keeps top evidence, and records worker failures or open questions as limitations. Every `ResearchResult` includes:
+
+- `synthesis_method`: `deterministic` or `semantic`
+- `synthesis_error`: the semantic synthesis error when fallback was needed, otherwise `null`
+
+Built-in semantic synthesis is available through `GeminiSemanticSynthesizer`, which runs a second Gemini CLI pass over the deterministic report and refines the summary plus reconciled findings. The CLI can enable it directly:
+
+```bash
+hgw-research \
+  "Should Hermes use Gemini CLI workers for current research?" \
+  --semantic-synthesis \
+  --format json \
+  --output-file reports/semantic-research.json
+```
+
+Python API example:
+
+```python
+from hermes_gemini_web_research import GeminiSemanticSynthesizer, ResearchOrchestrator, ResearchRequest
+from hermes_gemini_web_research.runner import GeminiRunner
+
+runner = GeminiRunner()
+request = ResearchRequest(
+    question="Should Hermes use Gemini CLI workers for current research?",
+    semantic_synthesis=True,
+)
+
+result = await ResearchOrchestrator(
+    runner,
+    synthesizer=GeminiSemanticSynthesizer(runner=runner),
+).run(request)
+```
+
+`SemanticSynthesizer` is exported from the package root as a protocol for custom implementations. If semantic synthesis raises or returns invalid JSON, the orchestrator falls back to the deterministic result with `synthesis_method="deterministic"` and `synthesis_error` set.
+
+## Hermes Integration
+
+The repository includes a usable Hermes/Codex skill at `hermes/skills/gemini-web-research/SKILL.md`. It documents when to use the tool, CLI invocation patterns, output-file handling, semantic synthesis, and Python API behavior. Supporting angle-set guidance lives in `hermes/skills/gemini-web-research/references/angle-sets.md`.
+
 ## Reliability
 
 `GeminiRunner` retries likely recoverable failures with bounded exponential backoff. Invalid worker JSON is retried because the same prompt can often recover on a second model call. Non-zero exits and wrapper-level errors are retried only when the error text looks transient, such as rate limits, 5xx responses, network failures, temporary unavailability, or overload.
@@ -162,12 +215,14 @@ runner = GeminiRunner(
 )
 ```
 
+## CI
+
+GitHub Actions runs `pytest` on Python 3.11 and 3.12 via `.github/workflows/ci.yml`.
+
 ## Current Limitations
 
-- The reconciliation step is deterministic and intentionally simple. It deduplicates findings by normalized text and does not yet perform semantic clustering.
+- The baseline reconciliation step is still deterministic and intentionally simple. Semantic clustering is available through the optional second Gemini pass, but it adds extra latency and model calls.
 - Gemini CLI flag conventions can still vary by wrapper. The default command shape is `gemini --output-format json --approval-mode=yolo --prompt "<prompt>"`; adjust `--gemini-command` and repeated `--gemini-arg` values as needed.
-- The CLI does not yet write report files directly. Redirect stdout when you need a persisted report.
-- There is no GitHub Action yet by design.
 - Tests do not invoke Gemini CLI or any network service.
 
 ## Development
