@@ -161,7 +161,7 @@ ANSI escape sequences are stripped before wrapper and worker JSON parsing so col
 
 ## Synthesis
 
-Deterministic reconciliation is always the baseline. It deduplicates findings by normalized text, keeps top evidence, and records worker failures or open questions as limitations. Every `ResearchResult` includes:
+Deterministic reconciliation is always the baseline. It now performs lightweight token-based clustering for near-duplicate findings, keeps top evidence, and records worker failures or open questions as limitations. Every `ResearchResult` includes:
 
 - `synthesis_method`: `deterministic` or `semantic`
 - `synthesis_error`: the semantic synthesis error when fallback was needed, otherwise `null`
@@ -221,7 +221,7 @@ GitHub Actions runs `pytest` on Python 3.11 and 3.12 via `.github/workflows/ci.y
 
 ## Current Limitations
 
-- The baseline reconciliation step is still deterministic and intentionally simple. Semantic clustering is available through the optional second Gemini pass, but it adds extra latency and model calls.
+- The baseline reconciliation step is still intentionally heuristic. It now adds lightweight semantic clustering and metadata-aware evidence ranking, but it is not a full semantic embedding pipeline.
 - Gemini CLI flag conventions can still vary by wrapper. The default command shape is `gemini --output-format json --approval-mode=yolo --prompt "<prompt>"`; adjust `--gemini-command` and repeated `--gemini-arg` values as needed.
 - Tests do not invoke Gemini CLI or any network service.
 
