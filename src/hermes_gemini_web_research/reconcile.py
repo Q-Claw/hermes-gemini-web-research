@@ -227,11 +227,13 @@ def _rank_and_dedupe_evidence(evidence: list[EvidenceItem]) -> list[EvidenceItem
 def _score_findings(findings: list[ReconciledFinding], *, total_angles: int) -> None:
     total_angles = max(total_angles, 1)
     for finding in findings:
-        evidence_scores = [min(_evidence_score(item), 1.0) for item in finding.evidence]
-        unique_sources = {_source_identity(item) for item in finding.evidence}
+        ranked_evidence = sorted(finding.evidence, key=_evidence_score, reverse=True)
+        finding.evidence = ranked_evidence
+        evidence_scores = [min(_evidence_score(item), 1.0) for item in ranked_evidence]
+        unique_sources = {_source_identity(item) for item in ranked_evidence}
         unique_sources.discard("")
         source_count = len(unique_sources)
-        source_diversity = source_count / len(finding.evidence) if finding.evidence else 0.0
+        source_diversity = source_count / len(ranked_evidence) if ranked_evidence else 0.0
         angle_score = min(len(set(finding.supporting_angles)) / total_angles, 1.0)
         source_score = min(source_count / 3, 1.0)
         evidence_quality = sum(evidence_scores) / len(evidence_scores) if evidence_scores else 0.0
@@ -240,7 +242,7 @@ def _score_findings(findings: list[ReconciledFinding], *, total_angles: int) -> 
         finding.source_count = source_count
         finding.source_diversity = round(source_diversity, 2)
         finding.consensus_score = round(min(consensus_score, 1.0), 2)
-        finding.best_evidence = finding.evidence[0] if finding.evidence else None
+        finding.best_evidence = ranked_evidence[0] if ranked_evidence else None
         finding.best_evidence_score = round(evidence_scores[0], 2) if evidence_scores else None
         finding.confidence = _confidence_label(finding.consensus_score)
         finding.severity = _severity_label(finding.consensus_score, has_contradiction=False)

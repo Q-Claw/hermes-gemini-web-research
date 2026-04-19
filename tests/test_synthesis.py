@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from hermes_gemini_web_research.models import (
+    EvidenceItem,
     ResearchAngle,
     ReconciledFinding,
     ResearchResult,
@@ -71,7 +72,23 @@ async def test_semantic_synthesizer_refines_summary_and_findings():
                     {
                         "finding": "Merged semantic finding",
                         "supporting_angles": ["Benefits", "Risks"],
-                        "evidence": [],
+                        "evidence": [
+                            {
+                                "type": "source",
+                                "claim": "Forum post mentions the feature.",
+                                "source_title": "Forum post",
+                                "confidence": 0.7,
+                            },
+                            {
+                                "type": "source",
+                                "claim": "Official docs confirm the feature.",
+                                "source_title": "Official docs",
+                                "url": "https://example.com/docs",
+                                "quote": "Use --output-format json for JSON output.",
+                                "published_date": "2026-04-19",
+                                "confidence": 0.82,
+                            },
+                        ],
                     }
                 ],
             }
@@ -87,6 +104,17 @@ async def test_semantic_synthesizer_refines_summary_and_findings():
 
     assert result.summary == "Semantic summary"
     assert result.findings[0].finding == "Merged semantic finding"
+    assert result.findings[0].best_evidence == EvidenceItem(
+        type="source",
+        claim="Official docs confirm the feature.",
+        source_title="Official docs",
+        url="https://example.com/docs",
+        quote="Use --output-format json for JSON output.",
+        published_date="2026-04-19",
+        confidence=0.82,
+    )
+    assert result.findings[0].best_evidence_score == 1.0
+    assert result.findings[0].evidence[0].source_title == "Official docs"
     assert result.worker_results[0].angle.name == "Benefits"
     assert result.limitations == ["Need more validation"]
     assert runner.calls
