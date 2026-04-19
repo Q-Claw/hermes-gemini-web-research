@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Current facts",
+    "description": "Find the most current factual answer with primary sources."
+  },
+  {
+    "name": "Evidence quality",
+    "description": "Check source quality, conflicts, uncertainty, and caveats."
+  },
+  {
+    "name": "Practical implications",
+    "description": "Explain what the findings mean for a decision maker."
+  }
+]
